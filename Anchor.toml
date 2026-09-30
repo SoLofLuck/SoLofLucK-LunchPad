@@ -1,0 +1,27 @@
+[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+# The program ID is rewritten from the LAUNCHPAD_PROGRAM_KEYPAIR secret by
+# scripts/sync-program-id.mjs before every CI build; see docs/DEPLOY.md.
+[programs.localnet]
+launchpad = "joU7UkoHdwYHkrPaswt4K36LQ2aB1NfLNkN51p7HUSc"
+
+[programs.devnet]
+launchpad = "joU7UkoHdwYHkrPaswt4K36LQ2aB1NfLNkN51p7HUSc"
+
+[programs.mainnet]
+launchpad = "joU7UkoHdwYHkrPaswt4K36LQ2aB1NfLNkN51p7HUSc"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test -p launchpad --features local-testing"
