@@ -160,7 +160,7 @@ jobs:
 
       - name: Commit the program address
         run: |
-          git checkout -- programs Anchor.toml app/src/idl
+          git checkout -- programs Anchor.toml Cargo.lock app/src/idl
           if [ "$NETWORK" = devnet ]; then
             # The committed source tracks the devnet deployment.
             node scripts/sync-program-id.mjs "$PROGRAM_ID" --network devnet --source
