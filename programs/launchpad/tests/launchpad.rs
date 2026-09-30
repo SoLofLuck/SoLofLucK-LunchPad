@@ -546,6 +546,28 @@ async fn migration_survives_raydium_costs_above_budget() {
     assert_curve_solvent(&mut env, &mint).await;
 }
 
+/// The scaled-down devnet economics (scripts/lib.mjs defaultParams) graduate
+/// at ~4.25 SOL and still leave enough for Raydium.
+#[tokio::test]
+async fn devnet_params_graduate() {
+    let mut p = default_params();
+    p.initial_virtual_sol_reserves = 3 * SOL / 2;
+    p.migration_fee_lamports = SOL / 20;
+    p.pool_creation_budget_lamports = SOL / 4;
+    let mut env = Env::with_params(p).await;
+    let creator = env.user(10 * SOL).await;
+    let whale = env.user(20 * SOL).await;
+    let mint = env.create_token(&creator, 0, 0, SOL / 20).await.unwrap();
+    env.buy(&whale, &mint, 10 * SOL, 1).await.unwrap();
+    let c = env.curve(&mint).await;
+    assert_eq!(c.status, CurveStatus::Complete);
+    assert!(c.real_sol_reserves > 4 * SOL && c.real_sol_reserves < 9 * SOL / 2, "{}", c.real_sol_reserves);
+    env.migrate(&mint).await.unwrap();
+    assert_eq!(env.curve(&mint).await.status, CurveStatus::Migrated);
+    env.claim_creator_lock(&creator, &mint).await.unwrap();
+    assert_curve_solvent(&mut env, &mint).await;
+}
+
 /// Many users buying and selling in random-ish order: the curve always stays
 /// solvent, and once everyone has sold, all that is left is fees + dust.
 #[tokio::test]

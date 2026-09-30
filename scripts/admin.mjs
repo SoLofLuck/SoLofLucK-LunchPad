@@ -5,7 +5,8 @@
 //
 // Commands:
 //   status                         print the config and a curve summary
-//   init <feeRecipient>            one-time setup (signer must be the upgrade authority)
+//   init [feeRecipient]            one-time setup (signer must be the upgrade authority;
+//                                  fee recipient defaults to the signer)
 //   update '<json>'                change params, e.g. '{"protocolFeeBps":80}'
 //   pause | unpause                stop/allow create + buy (sell, claims, migrate stay open)
 //   set-fee-recipient <pubkey>
@@ -13,32 +14,10 @@
 //   accept-admin                   step 2, signed by the new admin
 //   collect-fees                   push accrued protocol fees of every curve to the fee recipient
 import { PublicKey, SystemProgram } from '@solana/web3.js'
-import { ammConfigPda, BN, connect, loadKeypair, network, pda, program, RAYDIUM, send, statusOf } from './lib.mjs'
-
-const SOL = 1_000_000_000n
-const TOK = 1_000_000n
-
-/** Defaults: pump.fun-style economics, ~85 SOL to graduate. */
-function defaultParams(net) {
-  const r = RAYDIUM[net]
-  return {
-    protocolFeeBps: 70,
-    creatorFeeBps: 30,
-    tokenTotalSupply: new BN((1_000_000_000n * TOK).toString()),
-    curveTokenSupply: new BN((793_100_000n * TOK).toString()),
-    initialVirtualTokenReserves: new BN((1_073_000_000n * TOK).toString()),
-    initialVirtualSolReserves: new BN((30n * SOL).toString()),
-    migrationFeeLamports: new BN(SOL.toString()),
-    // Raydium's 0.15 SOL creation fee + ~0.05 SOL of pool rent, with margin.
-    poolCreationBudgetLamports: new BN(((SOL * 25n) / 100n).toString()),
-    raydiumCpmmProgram: r.cpmm,
-    raydiumAmmConfig: ammConfigPda(r.cpmm, 0),
-    raydiumCreatePoolFee: r.createPoolFee,
-  }
-}
+import { ammConfigPda, BN, connect, defaultParams, loadKeypair, network, pda, program, send, statusOf } from './lib.mjs'
 
 const USAGE =
-  'commands: status | init <feeRecipient> | update <json> | pause | unpause | set-fee-recipient <pk> | transfer-admin <pk> | accept-admin | collect-fees'
+  'commands: status | init [feeRecipient] | update <json> | pause | unpause | set-fee-recipient <pk> | transfer-admin <pk> | accept-admin | collect-fees'
 const [cmd, arg] = process.argv.slice(2)
 if (!cmd) {
   console.log(USAGE)
@@ -61,7 +40,7 @@ switch (cmd) {
   case 'status': {
     const cfg = await prog.account.globalConfig.fetchNullable(pda.config())
     if (!cfg) {
-      console.log(`No config yet on ${net} for program ${prog.programId.toBase58()}. Run: init <feeRecipient>`)
+      console.log(`No config yet on ${net} for program ${prog.programId.toBase58()}. Run: init [feeRecipient]`)
       break
     }
     console.log({
@@ -84,13 +63,24 @@ switch (cmd) {
     break
   }
   case 'init': {
-    if (!arg) throw new Error('usage: init <feeRecipient>')
+    const recipient = arg ? new PublicKey(arg) : kp.publicKey
     const params = defaultParams(net)
-    const ammInfo = await connection.getAccountInfo(params.raydiumAmmConfig)
-    if (!ammInfo) throw new Error(`Raydium AMM config ${params.raydiumAmmConfig.toBase58()} not found on ${net}`)
+    // Raydium's fee tiers are AMM configs at PDA indexes 0, 1, 2...; use the
+    // first one that exists on this cluster.
+    let found = false
+    for (let i = 0; i < 16 && !found; i++) {
+      const candidate = ammConfigPda(params.raydiumCpmmProgram, i)
+      const info = await connection.getAccountInfo(candidate)
+      if (info && info.owner.equals(params.raydiumCpmmProgram)) {
+        params.raydiumAmmConfig = candidate
+        found = true
+        console.log(`Using Raydium AMM config #${i}: ${candidate.toBase58()}`)
+      }
+    }
+    if (!found) throw new Error(`No Raydium CPMM AMM config found on ${net}`)
     await run(
       prog.methods
-        .initializeConfig(new PublicKey(arg), params)
+        .initializeConfig(recipient, params)
         .accountsPartial({ ...admin, programData: pda.programData(), systemProgram: SystemProgram.programId })
         .instruction(),
       'initialized',

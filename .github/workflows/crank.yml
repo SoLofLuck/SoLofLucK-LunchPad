@@ -1,8 +1,9 @@
 name: Crank (graduate completed curves)
 
 # Anyone can graduate a completed curve from the token page; this keeps it
-# automatic. Needs the CRANK_KEY secret (a small hot wallet with a little SOL
-# for fees) and the repository variables VITE_NETWORK / VITE_PROGRAM_ID.
+# automatic. Uses the CRANK_KEY secret if set (a small hot wallet with a little
+# SOL for fees), otherwise the deploy key. Network: the VITE_NETWORK variable
+# (default devnet); program address: app/src/program-ids.json.
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -19,10 +20,10 @@ jobs:
       - name: Check configuration
         id: check
         env:
-          KEY: ${{ secrets.CRANK_KEY }}
+          KEY: ${{ secrets.CRANK_KEY || secrets.LAUNCHPAD_DEPLOY_KEY }}
         run: |
-          if [ -z "$KEY" ] || [ -z "${{ vars.VITE_PROGRAM_ID }}" ]; then
-            echo "CRANK_KEY or VITE_PROGRAM_ID not set; skipping."
+          if [ -z "$KEY" ]; then
+            echo "No CRANK_KEY / LAUNCHPAD_DEPLOY_KEY secret; skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@v4
@@ -39,8 +40,9 @@ jobs:
         env:
           NETWORK: ${{ vars.VITE_NETWORK || 'devnet' }}
           PROGRAM_ID: ${{ vars.VITE_PROGRAM_ID }}
+          KEY: ${{ secrets.CRANK_KEY || secrets.LAUNCHPAD_DEPLOY_KEY }}
           RPC_URL: ${{ secrets.VITE_RPC_URL }}
         run: |
-          printf '%s' '${{ secrets.CRANK_KEY }}' > "$RUNNER_TEMP/crank.json"
+          printf '%s' "$KEY" > "$RUNNER_TEMP/crank.json"
           KEYPAIR="$RUNNER_TEMP/crank.json" node scripts/crank.mjs
           rm -f "$RUNNER_TEMP/crank.json"

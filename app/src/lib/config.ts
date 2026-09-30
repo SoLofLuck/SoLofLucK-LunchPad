@@ -1,12 +1,16 @@
 import { clusterApiUrl, PublicKey } from '@solana/web3.js'
 import idl from '../idl/launchpad.json'
+import programIds from '../program-ids.json'
 
 export type Network = 'devnet' | 'mainnet-beta'
 
 const env = import.meta.env
 export const NETWORK: Network = env.VITE_NETWORK === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'
 export const RPC_URL: string = env.VITE_RPC_URL || clusterApiUrl(NETWORK)
-export const PROGRAM_ID = new PublicKey(env.VITE_PROGRAM_ID || idl.address)
+const configuredId: string = env.VITE_PROGRAM_ID || (programIds as Record<string, string>)[NETWORK] || ''
+/** False until the program has been deployed to this network (the UI says so). */
+export const PROGRAM_DEPLOYED = configuredId !== ''
+export const PROGRAM_ID = new PublicKey(configuredId || idl.address)
 export const PINATA_JWT: string | undefined = env.VITE_PINATA_JWT || undefined
 
 export const EXPLORER = (kind: 'address' | 'tx', id: string) =>

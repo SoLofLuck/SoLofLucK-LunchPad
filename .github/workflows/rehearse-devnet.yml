@@ -1,0 +1,30 @@
+name: Rehearse on devnet
+
+# The whole token lifecycle against the real Raydium CPMM on devnet:
+# create -> buy -> Sell Lock -> buy-out -> graduation -> LP burned -> claims.
+# Uses LAUNCHPAD_DEPLOY_KEY (needs ~5 devnet SOL). Takes ~6 minutes because it
+# waits out a real 5-minute Sell Lock.
+on:
+  workflow_dispatch:
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    env:
+      NETWORK: devnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Rehearse
+        env:
+          RPC_URL: ${{ secrets.VITE_RPC_URL }}
+        run: |
+          printf '%s' '${{ secrets.LAUNCHPAD_DEPLOY_KEY }}' > "$RUNNER_TEMP/key.json"
+          KEYPAIR="$RUNNER_TEMP/key.json" node scripts/rehearse.mjs
+      - name: Remove key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/key.json"

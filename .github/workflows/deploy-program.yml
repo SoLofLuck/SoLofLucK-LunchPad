@@ -1,18 +1,21 @@
 name: Deploy program
 
-# Builds programs/launchpad with the real SBF toolchain and deploys or upgrades
-# it. Optionally initializes the launchpad config right after a first deploy.
+# Builds programs/launchpad with the real SBF toolchain and deploys it.
 #
-# Required repository secrets (Settings -> Secrets and variables -> Actions):
-#   LAUNCHPAD_DEPLOY_KEY       JSON keypair (64-number array). Pays for the
-#                              deploy and becomes the upgrade authority.
-#   LAUNCHPAD_PROGRAM_KEYPAIR  JSON keypair whose public key is the program ID.
-#                              Generate once, keep a backup; see docs/DEPLOY.md.
+# Only ONE secret is needed: LAUNCHPAD_DEPLOY_KEY, a JSON keypair (64-number
+# array). It pays for deploys, becomes the program's upgrade authority and the
+# launchpad admin. On devnet, fund it at https://faucet.solana.com (~10 SOL for
+# deploy + rehearsal); the workflow also tries the airdrop faucet.
+#
+# First deploy on a network: a fresh program address is generated here, the
+# program is deployed and the config initialized, and the address is committed
+# to app/src/program-ids.json — the site redeploys pointing at it. Later runs
+# upgrade the program in place (only the upgrade authority is needed for that).
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: "devnet (free test SOL) or mainnet-beta (REAL MONEY: ~3 SOL of rent)"
+        description: "devnet (free test SOL) or mainnet-beta (REAL MONEY: ~4 SOL of rent)"
         type: choice
         default: devnet
         options: [devnet, mainnet-beta]
@@ -20,10 +23,22 @@ on:
         description: "For mainnet-beta only, type exactly: I UNDERSTAND THIS IS REAL MONEY"
         type: string
         default: ""
-      init_fee_recipient:
-        description: "Optional. On a first deploy, initialize the config with this fee recipient wallet."
+      fee_recipient:
+        description: "Optional. Wallet that receives protocol fees (default: the deploy wallet). Used on first setup only."
         type: string
         default: ""
+      rehearse:
+        description: "devnet only: run the end-to-end rehearsal against Raydium after deploying"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: deploy-program
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -41,13 +56,12 @@ jobs:
             exit 1
           fi
 
-      - name: Check secrets
+      - name: Check the deploy key secret
         env:
           DEPLOY_KEY: ${{ secrets.LAUNCHPAD_DEPLOY_KEY }}
-          PROGRAM_KEY: ${{ secrets.LAUNCHPAD_PROGRAM_KEYPAIR }}
         run: |
-          if [ -z "$DEPLOY_KEY" ] || [ -z "$PROGRAM_KEY" ]; then
-            echo "::error::Set LAUNCHPAD_DEPLOY_KEY and LAUNCHPAD_PROGRAM_KEYPAIR secrets first (docs/DEPLOY.md)."
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::Add the LAUNCHPAD_DEPLOY_KEY secret first (docs/DEPLOY.md). Generate one with: node scripts/new-keypair.mjs"
             exit 1
           fi
 
@@ -69,64 +83,116 @@ jobs:
       - name: Install Anchor CLI 0.31.1
         run: command -v anchor >/dev/null || cargo install anchor-cli --version 0.31.1 --locked
 
-      - name: Write keys
+      - name: Configure wallet
         run: |
           mkdir -p ~/.config/solana
           printf '%s' '${{ secrets.LAUNCHPAD_DEPLOY_KEY }}' > ~/.config/solana/id.json
-          printf '%s' '${{ secrets.LAUNCHPAD_PROGRAM_KEYPAIR }}' > "$RUNNER_TEMP/program-keypair.json"
+          chmod 600 ~/.config/solana/id.json
           solana config set --url "$NETWORK" --keypair ~/.config/solana/id.json
+          echo "DEPLOYER=$(solana address)" >> "$GITHUB_ENV"
           echo "Deployer: $(solana address)"
-          solana balance
-
-      # Build with the program ID from the secret, whatever the committed
-      # placeholder is. The workflow prints the ID; commit it with
-      # scripts/sync-program-id.mjs so the app and IDL point at it too.
-      - name: Point the source at the program keypair
-        run: node scripts/sync-program-id.mjs "$RUNNER_TEMP/program-keypair.json"
-
-      - name: Build (SBF)
-        run: anchor build -p launchpad
 
       - name: Devnet airdrop
         if: inputs.network == 'devnet'
         continue-on-error: true
-        run: for i in 1 2 3 4 5; do solana airdrop 2 && break; sleep 15; done; solana balance
+        run: |
+          for i in 1 2 3 4 5 6; do
+            BAL=$(solana balance --lamports | awk '{print $1}')
+            [ "$BAL" -ge 10000000000 ] && break
+            solana airdrop 2 || sleep 20
+          done
+          solana balance
 
-      # A failed deploy leaves a buffer holding the rent; reclaim it first so
-      # the next attempt is not starved of SOL.
+      - name: Resolve the program address
+        run: |
+          ID=$(node -p "require('./app/src/program-ids.json')['$NETWORK'] || ''")
+          if [ -n "$ID" ] && solana program show "$ID" >/dev/null 2>&1; then
+            echo "Upgrading existing program $ID"
+            echo "MODE=upgrade" >> "$GITHUB_ENV"
+          else
+            solana-keygen new --no-bip39-passphrase --silent --force -o "$RUNNER_TEMP/program-keypair.json"
+            ID=$(solana address -k "$RUNNER_TEMP/program-keypair.json")
+            echo "First deploy on $NETWORK: new program address $ID"
+            echo "MODE=first" >> "$GITHUB_ENV"
+          fi
+          echo "PROGRAM_ID=$ID" >> "$GITHUB_ENV"
+
+      - name: Build (SBF)
+        run: |
+          node scripts/sync-program-id.mjs "$PROGRAM_ID" --network "$NETWORK" --source
+          anchor build -p launchpad
+          ls -la target/deploy/launchpad.so
+
+      - name: Check balance
+        run: |
+          NEED=$(( $(stat -c %s target/deploy/launchpad.so) * 2 * 6960 + 1000000000 ))
+          BAL=$(solana balance --lamports | awk '{print $1}')
+          echo "Balance: $BAL lamports; deploy needs roughly $NEED"
+          if [ "$BAL" -lt "$NEED" ]; then
+            echo "::error::The deploy wallet $DEPLOYER has too little SOL. Fund it (devnet: https://faucet.solana.com) and re-run."
+            exit 1
+          fi
+
+      # A failed deploy leaves a buffer holding the rent; reclaim it first.
       - name: Close leftover buffers
         run: solana program close --buffers --bypass-warning || true
 
-      - name: Deploy / upgrade
+      - name: Deploy
         run: |
+          if [ "$MODE" = first ]; then TARGET="$RUNNER_TEMP/program-keypair.json"; else TARGET="$PROGRAM_ID"; fi
           solana program deploy target/deploy/launchpad.so \
-            --program-id "$RUNNER_TEMP/program-keypair.json" \
+            --program-id "$TARGET" \
             --upgrade-authority ~/.config/solana/id.json \
             --with-compute-unit-price 50000 \
             --max-sign-attempts 60
-          solana program show "$(solana address -k "$RUNNER_TEMP/program-keypair.json")"
+          solana program show "$PROGRAM_ID"
 
-      - name: Initialize config
-        if: inputs.init_fee_recipient != ''
+      - name: Initialize the launchpad config (first setup)
         env:
           KEYPAIR: /home/runner/.config/solana/id.json
-          PROGRAM_ID_FILE: ${{ runner.temp }}/program-keypair.json
         run: |
-          export PROGRAM_ID="$(solana address -k "$PROGRAM_ID_FILE")"
-          node scripts/admin.mjs status | grep -q "No config yet" \
-            && node scripts/admin.mjs init "${{ inputs.init_fee_recipient }}" \
-            || echo "Config already initialized; skipping."
+          if node scripts/admin.mjs status | grep -q "No config yet"; then
+            node scripts/admin.mjs init ${{ inputs.fee_recipient }}
+          else
+            echo "Config already initialized."
+          fi
           node scripts/admin.mjs status
 
-      - name: Next steps
+      - name: Commit the program address
         run: |
-          ID="$(solana address -k "$RUNNER_TEMP/program-keypair.json")"
+          git checkout -- programs Anchor.toml app/src/idl
+          if [ "$NETWORK" = devnet ]; then
+            # The committed source tracks the devnet deployment.
+            node scripts/sync-program-id.mjs "$PROGRAM_ID" --network devnet --source
+          else
+            node scripts/sync-program-id.mjs "$PROGRAM_ID" --network "$NETWORK"
+          fi
+          if git diff --quiet; then echo "Nothing to commit."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: set $NETWORK program id to $PROGRAM_ID"
+          git push
+          echo "COMMITTED=true" >> "$GITHUB_ENV"
+
+      # Pushes made with GITHUB_TOKEN do not trigger other workflows, but a
+      # dispatch does.
+      - name: Redeploy the site and start the rehearsal
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy-app.yml --ref main
+          if [ "$NETWORK" = devnet ] && [ "${{ inputs.rehearse }}" = true ]; then
+            gh workflow run rehearse-devnet.yml --ref main
+          fi
+
+      - name: Summary
+        run: |
           {
-            echo "### Program deployed to $NETWORK"
-            echo "Program ID: \`$ID\`"
+            echo "### Launchpad deployed to $NETWORK"
+            echo "Program: \`$PROGRAM_ID\` ($MODE)"
             echo
-            echo "1. Set the repository variable VITE_PROGRAM_ID = $ID (and VITE_NETWORK = $NETWORK)."
-            echo "2. Commit the ID: node scripts/sync-program-id.mjs <program-keypair.json>"
+            echo "The address is committed to app/src/program-ids.json and the site is redeploying."
+            [ "$NETWORK" = devnet ] && echo "The devnet rehearsal workflow was started (unless disabled)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove keys

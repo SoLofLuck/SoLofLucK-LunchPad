@@ -27,7 +27,8 @@ export { BN }
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const IDL = JSON.parse(readFileSync(resolve(here, '../app/src/idl/launchpad.json'), 'utf8'))
-export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || IDL.address)
+const IDS = JSON.parse(readFileSync(resolve(here, '../app/src/program-ids.json'), 'utf8'))
+export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || IDS[process.env.NETWORK || 'devnet'] || IDL.address)
 
 /** Raydium CPMM per cluster (from @raydium-io/raydium-sdk-v2). */
 export const RAYDIUM = {
@@ -143,3 +144,148 @@ export async function send(connection, payer, ixs, extraSigners = [], units = 40
 }
 
 export const statusOf = (s) => Object.keys(s)[0]
+
+const SOL = 1_000_000_000n
+const TOK = 1_000_000n
+
+/**
+ * Defaults. Mainnet: pump.fun-style economics, ~85 SOL to graduate. Devnet:
+ * the same curve shape scaled down 20x (~4.25 SOL to graduate) so the full
+ * lifecycle, Raydium graduation included, can be rehearsed with faucet SOL.
+ */
+export function defaultParams(net) {
+  const r = RAYDIUM[net]
+  const devnet = net === 'devnet'
+  return {
+    protocolFeeBps: 70,
+    creatorFeeBps: 30,
+    tokenTotalSupply: new BN((1_000_000_000n * TOK).toString()),
+    curveTokenSupply: new BN((793_100_000n * TOK).toString()),
+    initialVirtualTokenReserves: new BN((1_073_000_000n * TOK).toString()),
+    initialVirtualSolReserves: new BN((devnet ? (SOL * 3n) / 2n : 30n * SOL).toString()),
+    migrationFeeLamports: new BN((devnet ? SOL / 20n : SOL).toString()),
+    // Raydium's 0.15 SOL creation fee + ~0.05 SOL of pool rent, with margin.
+    poolCreationBudgetLamports: new BN(((SOL * 25n) / 100n).toString()),
+    raydiumCpmmProgram: r.cpmm,
+    raydiumAmmConfig: ammConfigPda(r.cpmm, 0),
+    raydiumCreatePoolFee: r.createPoolFee,
+  }
+}
+
+
+// --- Instruction builders used by the rehearsal -------------------------------------
+
+const ata22 = (owner, mint) => getAssociatedTokenAddressSync(mint, owner, true, TOKEN_2022_PROGRAM_ID)
+const curveVaultOf = (mint) => ata22(pda.curve(mint), mint)
+
+export async function createIx(prog, creator, args) {
+  const mint = Keypair.generate()
+  const ix = await prog.methods
+    .create({
+      name: args.name,
+      symbol: args.symbol,
+      uri: args.uri,
+      sellLockSeconds: new BN(args.sellLockSeconds),
+      creatorLockSeconds: new BN(args.creatorLockSeconds),
+      initialBuyLamports: new BN(String(args.initialBuyLamports)),
+      minTokensOut: new BN(0),
+    })
+    .accountsPartial({
+      creator,
+      config: pda.config(),
+      mint: mint.publicKey,
+      curve: pda.curve(mint.publicKey),
+      solVault: pda.solVault(mint.publicKey),
+      curveVault: curveVaultOf(mint.publicKey),
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction()
+  return { ix, mint }
+}
+
+export function buyIx(prog, buyer, mint, maxCost, minOut = 1n) {
+  return prog.methods
+    .buy(new BN(String(maxCost)), new BN(String(minOut)))
+    .accountsPartial({
+      buyer,
+      config: pda.config(),
+      curve: pda.curve(mint),
+      solVault: pda.solVault(mint),
+      mint,
+      curveVault: curveVaultOf(mint),
+      buyerTokenAccount: ata22(buyer, mint),
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction()
+}
+
+export function sellIx(prog, seller, mint, amount, minOut = 0n) {
+  return prog.methods
+    .sell(new BN(String(amount)), new BN(String(minOut)))
+    .accountsPartial({
+      seller,
+      curve: pda.curve(mint),
+      solVault: pda.solVault(mint),
+      mint,
+      curveVault: curveVaultOf(mint),
+      sellerTokenAccount: ata22(seller, mint),
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction()
+}
+
+export function claimCreatorFeesIx(prog, creator, mint) {
+  return prog.methods
+    .claimCreatorFees()
+    .accountsPartial({ creator, curve: pda.curve(mint), solVault: pda.solVault(mint), systemProgram: SystemProgram.programId })
+    .instruction()
+}
+
+export function claimCreatorLockIx(prog, creator, mint) {
+  return prog.methods
+    .claimCreatorLock()
+    .accountsPartial({
+      creator,
+      curve: pda.curve(mint),
+      mint,
+      curveVault: curveVaultOf(mint),
+      creatorTokenAccount: ata22(creator, mint),
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction()
+}
+
+export function collectProtocolFeesIx(prog, mint, feeRecipient) {
+  return prog.methods
+    .collectProtocolFees()
+    .accountsPartial({
+      config: pda.config(),
+      curve: pda.curve(mint),
+      solVault: pda.solVault(mint),
+      feeRecipient,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction()
+}
+
+/** Simulates; returns the IDL error name the program failed with, or null on success. */
+export async function simulateError(connection, payer, ixs, signers = []) {
+  const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }), ...ixs)
+  tx.feePayer = payer.publicKey
+  tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash
+  tx.sign(payer, ...signers)
+  const sim = await connection.simulateTransaction(tx)
+  if (!sim.value.err) return null
+  const logs = (sim.value.logs ?? []).join('\n')
+  const m = logs.match(/Error Code: (\w+)/)
+  return m ? m[1] : JSON.stringify(sim.value.err)
+}
+
+export { ata22, curveVaultOf }
