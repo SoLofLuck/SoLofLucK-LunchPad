@@ -1,7 +1,7 @@
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { PublicKey } from '@solana/web3.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PROGRAM_ID } from './lib/config'
+import { PROGRAM_DEPLOYED, PROGRAM_ID } from './lib/config'
 import {
   decodeCurve,
   fetchAllCurves,
@@ -39,6 +39,10 @@ export function useTokens() {
   const metaCache = useRef(new Map<string, { name: string; symbol: string; uri: string }>())
 
   const load = useCallback(async () => {
+    if (!PROGRAM_DEPLOYED) {
+      setTokens([])
+      return
+    }
     try {
       const curves = await fetchAllCurves(program)
       const missing = curves.map((c) => c.mint).filter((m) => !metaCache.current.has(m.toBase58()))
@@ -60,9 +64,19 @@ export function useTokens() {
 
   useEffect(() => {
     load()
-    const id = setInterval(load, 20_000)
+    const id = setInterval(load, 30_000)
     return () => clearInterval(id)
   }, [load])
+
+  // Refresh soon after any launchpad activity, at most every 3 seconds.
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useProgramLogs(() => {
+    if (pending.current) return
+    pending.current = setTimeout(() => {
+      pending.current = null
+      load()
+    }, 3_000)
+  })
 
   return { tokens, error, reload: load }
 }
@@ -194,6 +208,7 @@ export function useProgramLogs(onLogs: (signature: string, logs: string[]) => vo
   const cb = useRef(onLogs)
   cb.current = onLogs
   useEffect(() => {
+    if (!PROGRAM_DEPLOYED) return
     const id = connection.onLogs(PROGRAM_ID, (l) => {
       if (!l.err) cb.current(l.signature, l.logs)
     }, 'confirmed')

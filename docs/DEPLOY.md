@@ -1,69 +1,67 @@
 # Deploy guide
 
-Everything runs from GitHub Actions; no local Solana toolchain is required.
+Everything runs from GitHub Actions; you never need the Solana CLI.
 
-## 1. Keys (once)
+## What you do (once)
 
-Create two keypairs locally (`solana-keygen new -o deploy.json` and
-`solana-keygen new -o program.json`, or any tool that writes the 64-number JSON
-format). Keep offline backups; never commit them.
+1. **Make the deploy key.**
+   ```bash
+   npm install
+   node scripts/new-keypair.mjs deploy-key.json
+   ```
+   It prints the public address. Keep `deploy-key.json` backed up offline: it is
+   the program's upgrade authority and the launchpad admin. Never commit it.
+2. **Fund it with devnet SOL.** Paste the address at https://faucet.solana.com
+   (sign in with GitHub for the higher limit). About **10 SOL** covers the program
+   deploy (~4 SOL of rent) and the end-to-end rehearsal (~5 SOL). The workflow also
+   tries the RPC airdrop, which is often rate limited.
+3. **Add the secret.** GitHub → *Settings → Secrets and variables → Actions →
+   New repository secret*: name `LAUNCHPAD_DEPLOY_KEY`, value = the full content of
+   `deploy-key.json` (the `[12,34,...]` array).
+4. **Enable Pages.** *Settings → Pages → Source: GitHub Actions* (one-time).
+5. **Run it.** *Actions → Deploy program → Run workflow* (network `devnet`).
 
-| Secret | Content |
-|---|---|
-| `LAUNCHPAD_DEPLOY_KEY` | `deploy.json` — pays for deploys and becomes the **upgrade authority** and config admin |
-| `LAUNCHPAD_PROGRAM_KEYPAIR` | `program.json` — its public key is the program ID |
+## What the workflow does for you
 
-Add them under *Settings → Secrets and variables → Actions*.
+- Builds the program with the real SBF toolchain.
+- First run on a network: generates the program address, deploys, initializes the
+  config (fee recipient = the deploy wallet unless you enter another), commits the
+  address to `app/src/program-ids.json`, and redeploys the site.
+- Later runs: upgrade the program in place.
+- On devnet, starts **Rehearse on devnet**: a real token goes through the whole
+  lifecycle against Raydium — create, buy, Sell Lock refusal, buy-out, graduation,
+  LP burn check, claims. Its summary lists every check with ✅/❌.
+- **Crank** (every 15 minutes) graduates completed curves automatically, using the
+  deploy key (or a separate `CRANK_KEY` secret if you add one).
 
-## 2. Deploy the program to devnet
+## Optional
 
-*Actions → Deploy program → Run workflow*: network `devnet`, and set
-`init_fee_recipient` to the wallet that should receive protocol fees. The run
-builds with the real SBF toolchain, deploys, initializes the config with the
-default economics, and prints the program ID in the run summary.
+| Where | Name | Why |
+|---|---|---|
+| Secret | `VITE_RPC_URL` | A dedicated RPC (Helius, Triton…). Public RPCs rate-limit chart history. |
+| Secret | `VITE_PINATA_JWT` | Logo uploads on the Create page (Pinata key with *Files: Write* only). Without it, creators paste a metadata URI. |
+| Secret | `CRANK_KEY` | A separate hot wallet for the crank instead of the deploy key. |
+| Variable | `VITE_NETWORK` | `mainnet-beta` once you launch there (default `devnet`). |
 
-Then point the repository at it:
+## Mainnet
 
-```bash
-node scripts/sync-program-id.mjs program.json   # declare_id, Anchor.toml, app IDL
-git commit -am "chore: set program id" && git push
-```
+1. Rehearsal on devnet is green.
+2. Fund the deploy wallet with ~5 SOL on mainnet.
+3. *Deploy program* with network `mainnet-beta` and the confirmation text.
+4. Set the `VITE_NETWORK` variable to `mainnet-beta` and re-run *Deploy app*.
+5. Strongly recommended: move the admin and upgrade authority to a multisig
+   (`admin.mjs transfer-admin`, then `solana program set-upgrade-authority`).
 
-## 3. Publish the site
-
-Repository **variables**: `VITE_NETWORK` = `devnet`, `VITE_PROGRAM_ID` = the ID.
-Repository **secrets** (optional but recommended): `VITE_RPC_URL` (e.g. Helius),
-`VITE_PINATA_JWT` (Files: Write only). *Settings → Pages → Source: GitHub Actions.*
-Every push to `main` touching `app/` redeploys.
-
-## 4. Automatic graduation (optional)
-
-Secret `CRANK_KEY`: a small hot wallet with ~0.1 SOL for fees. `crank.yml` runs every
-15 minutes and graduates every completed curve whose Sell Lock has expired. Users
-can also press *Graduate to Raydium* on the token page.
-
-## 5. Devnet rehearsal — do this before mainnet
-
-1. Create a token with a 5-minute Sell Lock and a small initial buy.
-2. Buy from a second wallet; confirm selling is refused until the lock expires.
-3. Buy the curve out (≈85 SOL of devnet SOL; lower `initialVirtualSolReserves` /
-   `curveTokenSupply` with `admin.mjs update` to rehearse cheaply).
-4. Graduate. On Solscan, check the Raydium pool, that the LP mint supply is 0
-   (plus Raydium's locked 100 units), and the fee recipient's receipt.
-5. Claim creator fees and the Creator Lock.
-
-## 6. Mainnet
-
-Run *Deploy program* with network `mainnet-beta` and the confirmation text. It costs
-roughly 3 SOL of rent. Switch `VITE_NETWORK` to `mainnet-beta`. Consider moving the
-upgrade authority and admin to a multisig (`admin.mjs transfer-admin`, then
-`solana program set-upgrade-authority`).
+Mainnet defaults: ~85 SOL to graduate, 1% trading fee (0.7% protocol / 0.3%
+creator), 1 SOL migration fee. Devnet uses the same curve scaled down 20× (~4.25
+SOL) so it can be tested with faucet SOL.
 
 ## Operator CLI
 
 ```bash
-NETWORK=devnet KEYPAIR=deploy.json node scripts/admin.mjs status
+NETWORK=devnet KEYPAIR=deploy-key.json node scripts/admin.mjs status
 node scripts/admin.mjs update '{"migrationFeeLamports": 500000000}'
 node scripts/admin.mjs pause        # create + buy only; sells/claims/migrate stay open
 node scripts/admin.mjs collect-fees
+NETWORK=devnet KEYPAIR=deploy-key.json node scripts/rehearse.mjs
 ```

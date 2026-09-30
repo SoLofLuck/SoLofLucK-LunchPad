@@ -147,7 +147,11 @@ label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; c
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 /* --- Token page ------------------------------------------------------------ */
-.token-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+.token-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: 'top side' 'bottom side'; gap: 16px 18px; align-items: start; }
+.area-top, .area-bottom, .area-side { display: grid; gap: 16px; min-width: 0; }
+.area-top { grid-area: top; }
+.area-bottom { grid-area: bottom; }
+.area-side { grid-area: side; }
 .token-head { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
 .token-head img, .token-head .thumb-fallback { width: 72px; height: 72px; border-radius: 14px; object-fit: cover; background: var(--bg-2); }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -184,6 +188,8 @@ footer { border-top: 1px solid var(--line); padding: 24px 0; color: var(--muted)
 
 @media (max-width: 960px) {
   .hero, .token-layout, .create-layout { grid-template-columns: 1fr; }
+  .token-layout { grid-template-areas: 'top' 'side' 'bottom'; }
+  .hide-sm { display: none; }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 640px) {

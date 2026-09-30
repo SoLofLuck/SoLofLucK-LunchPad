@@ -13,6 +13,7 @@ import {
 } from '../lib/config'
 import { quoteBuy, withSlippage } from '../lib/curve'
 import { fmtSol, fmtTokens, parseUnits } from '../lib/format'
+import { prepareLogo } from '../lib/image'
 import { uploadMetadata, uploadsEnabled } from '../lib/pinata'
 import { fetchConfig } from '../lib/program'
 import { href, navigate } from '../router'
@@ -82,12 +83,12 @@ export function Create() {
   if (initialBuy && parseUnits(initialBuy, 9) === null) problems.push('Initial buy must be a SOL amount.')
   if (config?.paused) problems.push('Launches are paused right now.')
 
-  const onFile = (f: File | undefined) => {
+  const onFile = async (f: File | undefined) => {
     if (!f) return
     if (!f.type.startsWith('image/')) return setError('That file is not an image.')
     if (f.size > MAX_IMAGE_BYTES) return setError('Images must be 4 MB or smaller.')
     setError(null)
-    setImage(f)
+    setImage(await prepareLogo(f))
   }
 
   const submit = async () => {

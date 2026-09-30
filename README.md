@@ -30,7 +30,7 @@ protections built into the program itself:
 npm install
 npm run dev                 # web app on http://localhost:5173 (devnet)
 npm test                    # app tests + graduation transaction size check
-npm run test:program        # 21 program tests (needs Rust)
+npm run test:program        # 23 program tests (needs Rust)
 ```
 
 App configuration lives in `app/.env` (see `app/.env.example`): network, RPC URL,
@@ -51,9 +51,13 @@ curve at creation so later changes never alter a live token's rules.
 | Trading fee | 1% (0.7% protocol, 0.3% creator), hard cap 5% |
 | Migration fee | 1 SOL, plus up to 0.25 SOL budget for Raydium's pool costs |
 
+## Going live
+
+Only one secret is needed; the workflows do the rest. See [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Status
 
 The program has **not been audited**. It is fully tested in-process (including a
-Raydium CPMM mock that checks the exact account layout), but the first end-to-end
-graduation against the real Raydium program must be rehearsed on devnet before
-mainnet. See [docs/DEPLOY.md](docs/DEPLOY.md).
+Raydium CPMM mock that checks the exact account layout), and the *Rehearse on
+devnet* workflow runs the whole lifecycle against the real Raydium program — make
+sure it is green before mainnet.

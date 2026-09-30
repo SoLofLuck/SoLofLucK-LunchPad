@@ -5,6 +5,7 @@ import { useOffchain, useSolPrice, useTokens } from '../hooks'
 import { compact, fmtUsd } from '../lib/format'
 import { marketCapSol, progressPct, type TokenView } from '../lib/program'
 import { href } from '../router'
+import { NETWORK, PROGRAM_DEPLOYED } from '../lib/config'
 
 type Sort = 'mcap' | 'new' | 'graduating' | 'graduated'
 
@@ -153,6 +154,12 @@ export function Home() {
         <input placeholder="Search name, symbol or mint" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
+      {!PROGRAM_DEPLOYED && (
+        <div className="warn-box" style={{ marginBottom: 16 }}>
+          🛠️ The launchpad program is not deployed on {NETWORK === 'devnet' ? 'devnet' : 'mainnet'} yet. Run the
+          “Deploy program” workflow; this page fills in automatically afterwards.
+        </div>
+      )}
       {error && <div className="error-box">Could not load tokens: {error}</div>}
       {!list ? (
         error ? null : <div className="grid">

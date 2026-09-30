@@ -238,6 +238,7 @@ export function TokenPage({ mintStr }: { mintStr: string }) {
           </h1>
           <div className="row wrap small" style={{ gap: 8, marginTop: 4 }}>
             <Copy text={mint.toBase58()} />
+            <Copy text={window.location.href} label="Share link" />
             <span className="muted">
               by <AddrLink addr={curve.creator.toBase58()} /> · {timeAgo(curve.createdAt, now)}
             </span>
@@ -268,17 +269,19 @@ export function TokenPage({ mintStr }: { mintStr: string }) {
       </div>
 
       <div className="token-layout">
-        <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+        <div className="area-top">
           <PriceChart trades={trades} startPrice={startPrice} solUsd={solUsd} />
           {off.description && (
             <div className="panel">
               <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{off.description}</p>
             </div>
           )}
+        </div>
+        <div className="area-bottom">
           <TradesTable trades={trades} loading={loadingTrades} />
         </div>
 
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div className="area-side">
           <GraduatePanel curve={curve} />
           <TradePanel curve={curve} symbol={symbol} onTraded={() => setTimeout(loadTrades, 1500)} />
 

@@ -24,7 +24,7 @@ export function TradesTable({ trades, loading }: { trades: TradeEvent[]; loading
                 <th>SOL</th>
                 <th>Tokens</th>
                 <th>When</th>
-                <th />
+                <th className="hide-sm" />
               </tr>
             </thead>
             <tbody>
@@ -37,7 +37,7 @@ export function TradesTable({ trades, loading }: { trades: TradeEvent[]; loading
                   <td>{fmtSol(t.solAmount, 4)}</td>
                   <td>{fmtTokens(t.tokenAmount)}</td>
                   <td className="muted">{timeAgo(t.timestamp, now)}</td>
-                  <td>
+                  <td className="hide-sm">
                     <TxLink signature={t.signature} />
                   </td>
                 </tr>

@@ -1,5 +1,6 @@
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { NETWORK } from '../lib/config'
+import { Airdrop } from './Airdrop'
 import { href, type Route } from '../router'
 
 export function Header({ route }: { route: Route }) {
@@ -20,10 +21,11 @@ export function Header({ route }: { route: Route }) {
         <nav className="nav">
           {link(href.home, 'Board', route.page === 'home')}
           {link(href.create, 'Create', route.page === 'create')}
-          {link(href.creator, 'Creator', route.page === 'creator')}
+          {link(href.creator, 'Profile', route.page === 'creator')}
           {link(href.how, 'How it works', route.page === 'how')}
         </nav>
         <span className="net-badge">{NETWORK === 'devnet' ? 'Devnet' : 'Mainnet'}</span>
+        <Airdrop />
         <WalletMultiButton />
       </div>
     </header>
