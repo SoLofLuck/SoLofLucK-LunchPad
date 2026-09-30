@@ -63,6 +63,8 @@ function Holders({ mint, curve }: { mint: PublicKey; curve: CurveState }) {
       <h3 style={{ marginBottom: 10 }}>Top holders</h3>
       {!rows ? (
         <div className="muted small">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted small">No holders yet.</div>
       ) : (
         <table>
           <tbody>

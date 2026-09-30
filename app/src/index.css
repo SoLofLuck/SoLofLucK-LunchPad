@@ -110,6 +110,7 @@ label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; c
 
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg button { flex: 1 1 auto; min-width: 64px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg-2); color: var(--muted); font-weight: 700; cursor: pointer; font-size: 13px; }
+.seg.compact button { min-width: 0; }
 .seg button.active { border-color: var(--accent-2); color: var(--accent); background: rgba(46, 232, 138, 0.08); }
 
 /* --- Home --------------------------------------------------------------------- */

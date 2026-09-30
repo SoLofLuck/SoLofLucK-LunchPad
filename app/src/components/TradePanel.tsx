@@ -233,7 +233,7 @@ export function TradePanel({ curve, symbol, onTraded }: { curve: CurveState; sym
 
       <div className="row" style={{ marginBottom: 12 }}>
         <span className="tiny muted">Slippage</span>
-        <div className="seg" style={{ flex: 1 }}>
+        <div className="seg compact" style={{ flex: 1, flexWrap: 'nowrap' }}>
           {SLIPPAGES.map((s) => (
             <button key={s} className={slippageBps === s ? 'active' : ''} onClick={() => setSlippageBps(s)}>
               {s / 100}%

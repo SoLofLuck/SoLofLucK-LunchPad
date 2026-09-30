@@ -2,9 +2,11 @@ import { fmtSol, fmtTokens, shortAddr, timeAgo } from '../lib/format'
 import type { TradeEvent } from '../lib/trades'
 import { AddrLink, TxLink } from './ui'
 import { useNow } from '../hooks'
+import { useState } from 'react'
 
 export function TradesTable({ trades, loading }: { trades: TradeEvent[]; loading: boolean }) {
   const now = useNow(10_000)
+  const [shown, setShown] = useState(25)
   return (
     <div className="panel">
       <h3 style={{ marginBottom: 10 }}>Trades</h3>
@@ -26,7 +28,7 @@ export function TradesTable({ trades, loading }: { trades: TradeEvent[]; loading
               </tr>
             </thead>
             <tbody>
-              {trades.slice(0, 100).map((t) => (
+              {trades.slice(0, shown).map((t) => (
                 <tr key={t.signature + t.trader + t.isBuy}>
                   <td>
                     <AddrLink addr={t.trader} label={shortAddr(t.trader)} />
@@ -42,6 +44,11 @@ export function TradesTable({ trades, loading }: { trades: TradeEvent[]; loading
               ))}
             </tbody>
           </table>
+          {trades.length > shown && (
+            <button className="btn sm block" style={{ marginTop: 10 }} onClick={() => setShown((n) => n + 50)}>
+              Show more ({trades.length - shown})
+            </button>
+          )}
         </div>
       )}
     </div>
