@@ -1,0 +1,15 @@
+{
+  "name": "solofluck-launchpad",
+  "private": true,
+  "type": "module",
+  "workspaces": ["app"],
+  "scripts": {
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w app",
+    "test": "npm test -w app && node scripts/check-tx-size.mjs",
+    "test:program": "cargo test -p launchpad --features local-testing",
+    "idl": "mkdir -p target/idl target/types && anchor idl build -p launchpad -o target/idl/launchpad.json -t target/types/launchpad.ts && node scripts/sync-idl.mjs",
+    "admin": "node scripts/admin.mjs",
+    "crank": "node scripts/crank.mjs"
+  }
+}

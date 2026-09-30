@@ -1,0 +1,52 @@
+name: Deploy app (GitHub Pages)
+
+# Repository variables: VITE_NETWORK, VITE_PROGRAM_ID.
+# Repository secrets:   VITE_RPC_URL (optional), VITE_PINATA_JWT (optional).
+# Settings -> Pages -> Source must be "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "package-lock.json", ".github/workflows/deploy-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build
+        env:
+          VITE_NETWORK: ${{ vars.VITE_NETWORK }}
+          VITE_PROGRAM_ID: ${{ vars.VITE_PROGRAM_ID }}
+          VITE_RPC_URL: ${{ secrets.VITE_RPC_URL }}
+          VITE_PINATA_JWT: ${{ secrets.VITE_PINATA_JWT }}
+        run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

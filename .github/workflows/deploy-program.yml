@@ -1,0 +1,134 @@
+name: Deploy program
+
+# Builds programs/launchpad with the real SBF toolchain and deploys or upgrades
+# it. Optionally initializes the launchpad config right after a first deploy.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   LAUNCHPAD_DEPLOY_KEY       JSON keypair (64-number array). Pays for the
+#                              deploy and becomes the upgrade authority.
+#   LAUNCHPAD_PROGRAM_KEYPAIR  JSON keypair whose public key is the program ID.
+#                              Generate once, keep a backup; see docs/DEPLOY.md.
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "devnet (free test SOL) or mainnet-beta (REAL MONEY: ~3 SOL of rent)"
+        type: choice
+        default: devnet
+        options: [devnet, mainnet-beta]
+      confirm_mainnet:
+        description: "For mainnet-beta only, type exactly: I UNDERSTAND THIS IS REAL MONEY"
+        type: string
+        default: ""
+      init_fee_recipient:
+        description: "Optional. On a first deploy, initialize the config with this fee recipient wallet."
+        type: string
+        default: ""
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NETWORK: ${{ inputs.network }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm mainnet
+        if: inputs.network == 'mainnet-beta'
+        run: |
+          if [ "${{ inputs.confirm_mainnet }}" != "I UNDERSTAND THIS IS REAL MONEY" ]; then
+            echo "::error::mainnet-beta requires confirm_mainnet = 'I UNDERSTAND THIS IS REAL MONEY'. Nothing was deployed."
+            exit 1
+          fi
+
+      - name: Check secrets
+        env:
+          DEPLOY_KEY: ${{ secrets.LAUNCHPAD_DEPLOY_KEY }}
+          PROGRAM_KEY: ${{ secrets.LAUNCHPAD_PROGRAM_KEYPAIR }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ] || [ -z "$PROGRAM_KEY" ]; then
+            echo "::error::Set LAUNCHPAD_DEPLOY_KEY and LAUNCHPAD_PROGRAM_KEYPAIR secrets first (docs/DEPLOY.md)."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Install the Solana CLI (Agave)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor CLI 0.31.1
+        run: command -v anchor >/dev/null || cargo install anchor-cli --version 0.31.1 --locked
+
+      - name: Write keys
+        run: |
+          mkdir -p ~/.config/solana
+          printf '%s' '${{ secrets.LAUNCHPAD_DEPLOY_KEY }}' > ~/.config/solana/id.json
+          printf '%s' '${{ secrets.LAUNCHPAD_PROGRAM_KEYPAIR }}' > "$RUNNER_TEMP/program-keypair.json"
+          solana config set --url "$NETWORK" --keypair ~/.config/solana/id.json
+          echo "Deployer: $(solana address)"
+          solana balance
+
+      # Build with the program ID from the secret, whatever the committed
+      # placeholder is. The workflow prints the ID; commit it with
+      # scripts/sync-program-id.mjs so the app and IDL point at it too.
+      - name: Point the source at the program keypair
+        run: node scripts/sync-program-id.mjs "$RUNNER_TEMP/program-keypair.json"
+
+      - name: Build (SBF)
+        run: anchor build -p launchpad
+
+      - name: Devnet airdrop
+        if: inputs.network == 'devnet'
+        continue-on-error: true
+        run: for i in 1 2 3 4 5; do solana airdrop 2 && break; sleep 15; done; solana balance
+
+      # A failed deploy leaves a buffer holding the rent; reclaim it first so
+      # the next attempt is not starved of SOL.
+      - name: Close leftover buffers
+        run: solana program close --buffers --bypass-warning || true
+
+      - name: Deploy / upgrade
+        run: |
+          solana program deploy target/deploy/launchpad.so \
+            --program-id "$RUNNER_TEMP/program-keypair.json" \
+            --upgrade-authority ~/.config/solana/id.json \
+            --with-compute-unit-price 50000 \
+            --max-sign-attempts 60
+          solana program show "$(solana address -k "$RUNNER_TEMP/program-keypair.json")"
+
+      - name: Initialize config
+        if: inputs.init_fee_recipient != ''
+        env:
+          KEYPAIR: /home/runner/.config/solana/id.json
+          PROGRAM_ID_FILE: ${{ runner.temp }}/program-keypair.json
+        run: |
+          export PROGRAM_ID="$(solana address -k "$PROGRAM_ID_FILE")"
+          node scripts/admin.mjs status | grep -q "No config yet" \
+            && node scripts/admin.mjs init "${{ inputs.init_fee_recipient }}" \
+            || echo "Config already initialized; skipping."
+          node scripts/admin.mjs status
+
+      - name: Next steps
+        run: |
+          ID="$(solana address -k "$RUNNER_TEMP/program-keypair.json")"
+          {
+            echo "### Program deployed to $NETWORK"
+            echo "Program ID: \`$ID\`"
+            echo
+            echo "1. Set the repository variable VITE_PROGRAM_ID = $ID (and VITE_NETWORK = $NETWORK)."
+            echo "2. Commit the ID: node scripts/sync-program-id.mjs <program-keypair.json>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove keys
+        if: always()
+        run: rm -f ~/.config/solana/id.json "$RUNNER_TEMP/program-keypair.json"

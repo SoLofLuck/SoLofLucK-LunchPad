@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  program:
+    name: Program tests + IDL check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: true
+
+      # In-process tests: the real Token-2022 / SPL Token / ATA programs plus a
+      # Raydium CPMM mock, no validator needed.
+      - name: cargo test
+        run: cargo test -p launchpad --features local-testing
+
+      - name: Install Anchor CLI 0.31.1
+        run: command -v anchor >/dev/null || cargo install anchor-cli --version 0.31.1 --locked
+
+      # The web app ships a copy of the IDL; it must match the program.
+      - name: IDL is in sync with the program
+        run: |
+          mkdir -p target/idl target/types
+          anchor idl build -p launchpad -o target/idl/launchpad.json -t target/types/launchpad.ts
+          node scripts/sync-idl.mjs --check
+
+  app:
+    name: App tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Curve maths mirror of the Rust tests, and the graduation tx size check.
+      - run: npm test
+      - run: npm run build
