@@ -1,0 +1,7 @@
+# The SBF toolchain that builds the deployed program ships its own (older)
+# rustc. Declaring rust-version in programs/launchpad/Cargo.toml and resolving
+# with this setting keeps every dependency on a version that toolchain can
+# compile (no edition-2024 crates), while newer versions are still allowed
+# where nothing older exists (dev-dependencies only need the host toolchain).
+[resolver]
+incompatible-rust-versions = "fallback"

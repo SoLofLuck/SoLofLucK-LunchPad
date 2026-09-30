@@ -25,6 +25,13 @@ jobs:
       - name: cargo test
         run: cargo test -p launchpad --features local-testing
 
+      # The SBF toolchain that builds the deployed program bundles an older
+      # rustc; the lockfile must stay buildable by it (see .cargo/config.toml).
+      - name: Program builds with the SBF toolchain's rustc (1.84)
+        run: |
+          rustup toolchain install 1.84.1 --profile minimal
+          cargo +1.84.1 build -p launchpad --lib --locked
+
       - name: Install Anchor CLI 0.31.1
         run: command -v anchor >/dev/null || cargo install anchor-cli --version 0.31.1 --locked
 

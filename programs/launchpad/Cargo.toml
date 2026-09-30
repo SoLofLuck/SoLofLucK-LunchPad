@@ -3,6 +3,8 @@ name = "launchpad"
 version = "0.1.0"
 description = "SoLofLuck LaunchPad: bonding-curve token launches with an on-curve Sell Lock, a Creator Lock and permissionless graduation to Raydium CPMM."
 edition = "2021"
+# See .cargo/config.toml: keeps the lockfile buildable by the SBF toolchain.
+rust-version = "1.84"
 
 [lib]
 crate-type = ["cdylib", "lib"]
