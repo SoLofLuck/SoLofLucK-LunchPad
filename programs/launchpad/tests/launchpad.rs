@@ -469,10 +469,14 @@ async fn completion_and_migration_to_raydium() {
         env.lamports(&authority).await,
         rent_for(0) + c.protocol_fees_accrued + c.creator_fees_accrued
     );
+    // The fee recipient got the migration fee plus the unused budget:
+    // 1 SOL + 0.5 SOL minus the mock's 0.15 SOL fee and pool rent.
     let fee_after = env.lamports(&env.fee_recipient.clone()).await;
-    assert!(fee_after > fee_before, "leftover budget not swept");
-    // Migration fee is accrued for collection, alongside trading fees.
-    assert!(c.protocol_fees_accrued >= SOL);
+    let received = fee_after - fee_before;
+    assert!(
+        received > SOL + SOL / 4 && received < SOL + SOL / 2,
+        "{received}"
+    );
     assert_curve_solvent(&mut env, &mint).await;
 
     assert_err(
@@ -524,6 +528,22 @@ async fn migration_rejects_foreign_raydium_accounts() {
         env.migrate(&mint).await.map(|_| ()),
         LaunchpadError::InvalidRaydiumAccount,
     );
+}
+
+/// If Raydium's costs outgrow the snapshotted budget, graduation still works,
+/// paid out of the migration fee.
+#[tokio::test]
+async fn migration_survives_raydium_costs_above_budget() {
+    let mut p = default_params();
+    p.pool_creation_budget_lamports = 1; // far below the mock's ~0.15 SOL
+    let mut env = Env::with_params(p).await;
+    let creator = env.user(10 * SOL).await;
+    let whale = env.user(200 * SOL).await;
+    let mint = env.create_token(&creator, 0, 0, 0).await.unwrap();
+    env.buy(&whale, &mint, 150 * SOL, 1).await.unwrap();
+    env.migrate(&mint).await.unwrap();
+    assert_eq!(env.curve(&mint).await.status, CurveStatus::Migrated);
+    assert_curve_solvent(&mut env, &mint).await;
 }
 
 /// Many users buying and selling in random-ish order: the curve always stays

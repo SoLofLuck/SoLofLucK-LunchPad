@@ -45,6 +45,8 @@ pub struct Migrated {
     pub sol_to_pool: u64,
     pub tokens_to_pool: u64,
     pub tokens_burned: u64,
+    /// Paid to the fee recipient: the migration fee plus the unused part of
+    /// the pool creation budget.
     pub migration_fee: u64,
     pub timestamp: i64,
 }

@@ -66,8 +66,11 @@ Meteora. Enforcing it in the curve removes that restriction entirely.
    that PDA depends only on (amm config, mint, WSOL), so anyone could create it
    first with dust and block graduation forever.
 6. All LP tokens are burned; the temporary ATAs are closed (rent back to the
-   caller); whatever Raydium did not use of the budget is swept to the fee
-   recipient, and the solvency check proves Raydium stayed within the budget.
+   caller). The migration fee and the budget act as one buffer for Raydium's
+   costs; what is left of them goes to the fee recipient. Because both are
+   snapshotted at creation, a later rise in Raydium's pool fee cannot block
+   graduation of existing tokens. The solvency check proves Raydium never touched
+   the creator's unclaimed fees or other balances.
 
 The transaction has 25 accounts and serializes to 1086 bytes (limit 1232);
 `scripts/check-tx-size.mjs` guards this in CI.

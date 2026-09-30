@@ -35,7 +35,9 @@ pub struct ConfigParams {
     /// and the steepness of the curve.
     pub initial_virtual_token_reserves: u64,
     pub initial_virtual_sol_reserves: u64,
-    /// Paid to `fee_recipient` out of the raised SOL at graduation.
+    /// Kept by the protocol out of the raised SOL at graduation. Together with
+    /// the pool creation budget it also covers Raydium's costs, so graduation
+    /// keeps working if those costs rise after a token was created.
     pub migration_fee_lamports: u64,
     /// Handed to the pool authority to pay Raydium's pool creation fee and the
     /// rent of the pool accounts. Whatever is left afterwards is swept to

@@ -144,7 +144,7 @@ pub fn migrate(ctx: Context<Migrate>) -> Result<()> {
     let mint_key = ctx.accounts.mint.key();
 
     // --- Checks and amounts -------------------------------------------------
-    let (sol_to_pool, tokens_to_pool, tokens_to_burn, migration_fee) = {
+    let (sol_to_pool, tokens_to_pool, tokens_to_burn) = {
         let curve = &ctx.accounts.curve;
         match curve.status {
             CurveStatus::Trading => return err!(LaunchpadError::CurveNotComplete),
@@ -167,7 +167,7 @@ pub fn migrate(ctx: Context<Migrate>) -> Result<()> {
             .min(curve.lp_token_reserve);
         require!(tokens_to_pool > 0, LaunchpadError::ZeroAmount);
         let tokens_to_burn = curve.lp_token_reserve - tokens_to_pool + r.real_token;
-        (sol_to_pool, tokens_to_pool, tokens_to_burn, fee)
+        (sol_to_pool, tokens_to_pool, tokens_to_burn)
     };
 
     // --- Bookkeeping first, then move the value out. -----------------------
@@ -176,10 +176,6 @@ pub fn migrate(ctx: Context<Migrate>) -> Result<()> {
         curve.real_sol_reserves = 0;
         curve.real_token_reserves = 0;
         curve.lp_token_reserve = 0;
-        curve.protocol_fees_accrued = curve
-            .protocol_fees_accrued
-            .checked_add(migration_fee)
-            .ok_or_else(|| error!(LaunchpadError::MathOverflow))?;
         curve.status = CurveStatus::Migrated;
         curve.raydium_pool = ctx.accounts.pool_state.key();
     }
@@ -362,9 +358,13 @@ pub fn migrate(ctx: Context<Migrate>) -> Result<()> {
             authority_seeds,
         ))?;
     }
-    // Whatever Raydium did not use of the pool creation budget. The solvency
-    // check that follows proves Raydium stayed within the budget: the vault
-    // must still hold its rent minimum plus every fee it owes.
+    // The migration fee and the pool creation budget stayed in the vault;
+    // Raydium paid its costs from them. What is left is the protocol's
+    // migration revenue. Both amounts act as one buffer on purpose: they are
+    // snapshotted when the token is created, so if Raydium's costs later rise
+    // above the budget alone, graduation still works (out of the fee) instead
+    // of being blocked forever. The solvency check that follows proves Raydium
+    // never touched the reserves owed to anyone else.
     let required = a.curve.required_vault_lamports()?;
     let leftover = a.sol_vault.lamports().saturating_sub(required);
     if leftover > 0 {
@@ -388,7 +388,7 @@ pub fn migrate(ctx: Context<Migrate>) -> Result<()> {
         sol_to_pool,
         tokens_to_pool,
         tokens_burned: tokens_to_burn,
-        migration_fee,
+        migration_fee: leftover,
         timestamp: now,
     });
     Ok(())

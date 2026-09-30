@@ -1963,7 +1963,9 @@ export type Launchpad = {
           {
             "name": "migrationFeeLamports",
             "docs": [
-              "Paid to `fee_recipient` out of the raised SOL at graduation."
+              "Kept by the protocol out of the raised SOL at graduation. Together with",
+              "the pool creation budget it also covers Raydium's costs, so graduation",
+              "keeps working if those costs rise after a token was created."
             ],
             "type": "u64"
           },
@@ -2202,6 +2204,10 @@ export type Launchpad = {
           },
           {
             "name": "migrationFee",
+            "docs": [
+              "Paid to the fee recipient: the migration fee plus the unused part of",
+              "the pool creation budget."
+            ],
             "type": "u64"
           },
           {
